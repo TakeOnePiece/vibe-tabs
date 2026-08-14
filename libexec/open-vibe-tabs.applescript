@@ -1,18 +1,8 @@
 -- macOS app entry point. The command handles YAML and legacy configs.
 
-use framework "ApplicationServices"
-use framework "Foundation"
 use scripting additions
 
 on run argv
-	set accessibilityOptions to current application's NSDictionary's dictionaryWithObject:true forKey:(current application's kAXTrustedCheckOptionPrompt)
-	set isAccessibilityTrusted to current application's AXIsProcessTrustedWithOptions(accessibilityOptions)
-	if (isAccessibilityTrusted as boolean) is false then
-		set dialogResult to display dialog "Vibe Tabs needs Accessibility access to create native Terminal tabs." & return & return & "Enable Vibe Tabs in System Settings, then click the Dock icon again." buttons {"Cancel", "Open Settings"} default button "Open Settings" with icon caution
-		if button returned of dialogResult is "Open Settings" then do shell script "/usr/bin/open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'"
-		return
-	end if
-
 	set homeFolder to my homeDirectory()
 	set launcherBin to my resolveExecutable("vibe-tabs", {homeFolder & "/bin/vibe-tabs", "/opt/homebrew/bin/vibe-tabs", "/usr/local/bin/vibe-tabs"})
 	set launchCommand to quoted form of launcherBin
@@ -24,7 +14,12 @@ on run argv
 	try
 		do shell script launchCommand
 	on error errorMessage number errorNumber
-		display dialog "Vibe Tabs could not open your projects." & return & return & errorMessage buttons {"OK"} default button "OK" with icon stop
+		if errorMessage contains "Accessibility" then
+			set dialogResult to display dialog "Vibe Tabs needs Accessibility access to create native Terminal tabs." & return & return & "Enable Vibe Tabs in System Settings, then click the Dock icon again." buttons {"Cancel", "Open Settings"} default button "Open Settings" with icon caution
+			if button returned of dialogResult is "Open Settings" then do shell script "/usr/bin/open 'x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility'"
+		else
+			display dialog "Vibe Tabs could not open your projects." & return & return & errorMessage buttons {"OK"} default button "OK" with icon stop
+		end if
 	end try
 end run
 
