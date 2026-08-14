@@ -1,0 +1,27 @@
+version: 1
+
+defaults:
+  session_suffix: laptop
+  layout: auto
+  panes:
+    - claude
+    - codex
+  codex_args: ""
+
+sessions:
+  - name: web
+    path: ~/Code/example-web
+
+  - name: mobile
+    path: ~/Code/example-mobile
+    panes:
+      - gemini
+      - codex
+
+  - name: research
+    path: ~/Code/research
+    layout: tiled
+    panes:
+      - claude
+      - pi
+      - aider --model deepseek/deepseek-chat

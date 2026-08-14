@@ -1,0 +1,11 @@
+.DS_Store
+*.scpt
+.coding-sessions.yml
+.coding-sessions.yaml
+.env
+.env.*
+*.jsonl
+*.sqlite
+*.sqlite-*
+*.pem
+*.key
