@@ -1,34 +1,49 @@
 -- Open one named project in tmux, with one pane per configured coding command.
--- Usage: vibe-tab [session-name] /path/to/project [command ...]
+-- Usage: vibe-tab [options] [session-name] /path/to/project [command ...]
 
 on run argv
 	set requestedLayout to "auto"
-	set effectiveArgs to argv
-	if (count of argv) > 1 and item 1 of argv is "--layout" then
-		set requestedLayout to item 2 of argv
-		if (count of argv) > 2 then
-			set effectiveArgs to items 3 thru -1 of argv
+	set terminalProfile to ""
+	set forceNewWindow to false
+	set effectiveArgs to {}
+	set argumentPosition to 1
+
+	repeat while argumentPosition <= (count of argv)
+		set currentArgument to item argumentPosition of argv
+		if currentArgument is "--layout" then
+			if argumentPosition + 1 > (count of argv) then error "--layout requires a value"
+			set requestedLayout to item (argumentPosition + 1) of argv
+			set argumentPosition to argumentPosition + 2
+		else if currentArgument is "--profile" then
+			if argumentPosition + 1 > (count of argv) then error "--profile requires a value"
+			set terminalProfile to item (argumentPosition + 1) of argv
+			set argumentPosition to argumentPosition + 2
+		else if currentArgument is "--new-window" then
+			set forceNewWindow to true
+			set argumentPosition to argumentPosition + 1
 		else
-			set effectiveArgs to {}
+			set effectiveArgs to items argumentPosition thru -1 of argv
+			exit repeat
 		end if
-	end if
+	end repeat
 
 	if (count of effectiveArgs) is 1 then
-		openProject(item 1 of effectiveArgs, "", {}, requestedLayout)
+		openProject(item 1 of effectiveArgs, "", {}, requestedLayout, terminalProfile, forceNewWindow)
 	else if (count of effectiveArgs) is 2 then
-		openProject(item 2 of effectiveArgs, item 1 of effectiveArgs, {}, requestedLayout)
+		openProject(item 2 of effectiveArgs, item 1 of effectiveArgs, {}, requestedLayout, terminalProfile, forceNewWindow)
 	else if (count of effectiveArgs) > 2 then
 		set paneSpecs to items 3 thru -1 of effectiveArgs
-		openProject(item 2 of effectiveArgs, item 1 of effectiveArgs, paneSpecs, requestedLayout)
+		openProject(item 2 of effectiveArgs, item 1 of effectiveArgs, paneSpecs, requestedLayout, terminalProfile, forceNewWindow)
 	else
-		error "Usage: vibe-tab [--layout layout] [session-name] /path/to/project [command ...]"
+		error "Usage: vibe-tab [--layout layout] [--profile name] [--new-window] [session-name] /path/to/project [command ...]"
 	end if
 end run
 
-on openProject(rawFolder, requestedName, configuredPanes, requestedLayout)
+on openProject(rawFolder, requestedName, configuredPanes, requestedLayout, terminalProfile, forceNewWindow)
 	set homeFolder to my homeDirectory()
 	set tmuxBin to my resolveExecutable("tmux", {"/opt/homebrew/bin/tmux", "/usr/local/bin/tmux"})
 	set projectFolder to my expandHomePath(rawFolder, homeFolder)
+	my validateTerminalProfile(terminalProfile)
 
 	do shell script "/bin/test -d " & quoted form of projectFolder
 	set canonicalFolder to do shell script "/bin/zsh -c " & quoted form of ("cd " & quoted form of projectFolder & " && /bin/pwd -P")
@@ -62,19 +77,36 @@ on openProject(rawFolder, requestedName, configuredPanes, requestedLayout)
 		repeat with paneSpecRef in paneSpecs
 			set panePosition to panePosition + 1
 			set paneSpec to contents of paneSpecRef
+			set paneConfig to my parsePaneSpec(paneSpec, homeFolder)
+			set paneAgent to paneAgent of paneConfig
+			set configuredCommand to paneCommand of paneConfig
+			set configuredTitle to paneTitle of paneConfig
+			set extraArgs to paneArgs of paneConfig
+			set dangerousMode to paneDangerous of paneConfig
+			set dangerousArgs to paneDangerousArgs of paneConfig
 
-			if paneSpec is "claude" then
-				set paneCommand to my claudeCommand(sessionName, homeFolder)
+			if paneAgent is "claude" then
+				set paneCommand to my claudeCommand(sessionName, homeFolder, dangerousMode, extraArgs, dangerousArgs)
 				set paneTitle to sessionName & "-claude"
-			else if paneSpec is "codex" then
-				set codexResult to my codexCommand(sessionName, homeFolder)
+			else if paneAgent is "codex" then
+				set codexResult to my codexCommand(sessionName, homeFolder, dangerousMode, extraArgs, dangerousArgs)
 				set paneCommand to commandText of codexResult
 				set paneTitle to sessionName & "-codex"
 				if renameAfterLaunch of codexResult then set end of codexRenamePositions to panePosition
 			else
-				set paneCommand to "/bin/zsh -lc " & quoted form of (paneSpec & "; exec /bin/zsh -l")
-				set paneTitle to sessionName & "-" & my commandLabel(paneSpec, panePosition)
+				if paneAgent is not "" then
+					set configuredCommand to paneAgent
+					set effectiveArgs to my effectiveAgentArgs(paneAgent, dangerousMode, extraArgs, dangerousArgs)
+					if effectiveArgs is not "" then set configuredCommand to configuredCommand & " " & effectiveArgs
+				else
+					set effectiveArgs to my effectiveAgentArgs("", dangerousMode, extraArgs, dangerousArgs)
+					if effectiveArgs is not "" then set configuredCommand to configuredCommand & " " & effectiveArgs
+				end if
+				set paneCommand to "/bin/zsh -lc " & quoted form of (configuredCommand & "; exec /bin/zsh -l")
+				set paneTitle to sessionName & "-" & my commandLabel(configuredCommand, panePosition)
 			end if
+
+			if configuredTitle is not "" then set paneTitle to sessionName & "-" & my slugify(configuredTitle)
 
 			set end of paneCommands to paneCommand
 			set end of paneTitles to paneTitle
@@ -131,7 +163,7 @@ on openProject(rawFolder, requestedName, configuredPanes, requestedLayout)
 	on error
 	end try
 
-	if my focusNamedTerminalTab(sessionName) then return
+	if my focusNamedTerminalTab(sessionName, terminalProfile) then return
 
 	set attachedTTY to ""
 	try
@@ -141,7 +173,7 @@ on openProject(rawFolder, requestedName, configuredPanes, requestedLayout)
 	end try
 
 	if attachedTTY is not "" then
-		if my nameAndFocusTerminalTab(attachedTTY, sessionName) then return
+		if my nameAndFocusTerminalTab(attachedTTY, sessionName, terminalProfile) then return
 		tell application "Terminal" to activate
 		return
 	end if
@@ -149,34 +181,43 @@ on openProject(rawFolder, requestedName, configuredPanes, requestedLayout)
 	set attachCommand to quoted form of tmuxBin & " attach-session -t " & quoted form of sessionName
 	tell application "Terminal"
 		activate
-		if (count of windows) is 0 then
+		if forceNewWindow or (count of windows) is 0 then
 			set launchedTab to do script attachCommand
 			my waitForTmuxClient(tmuxBin, sessionName)
 			set custom title of launchedTab to sessionName
 			set title displays custom title of launchedTab to true
+			my applyTerminalProfile(launchedTab, terminalProfile)
 		else
 			set targetWindow to front window
-			set oldTabCount to count of tabs of targetWindow
-			tell application "System Events" to key code 17 using command down
-			delay 0.3
+			set previousWindowIDs to id of every window
+			set previousTabCount to count of tabs of targetWindow
+			tell application "System Events"
+				tell process "Terminal"
+					set frontmost to true
+					key code 17 using command down
+				end tell
+			end tell
+			delay 0.4
 
-			if (count of tabs of targetWindow) > oldTabCount then
-				set launchedTab to selected tab of targetWindow
-				do script attachCommand in launchedTab
-				my waitForTmuxClient(tmuxBin, sessionName)
-				set custom title of launchedTab to sessionName
-				set title displays custom title of launchedTab to true
-			else
-				set launchedTab to do script attachCommand
-				my waitForTmuxClient(tmuxBin, sessionName)
-				set custom title of launchedTab to sessionName
-				set title displays custom title of launchedTab to true
-			end if
+			set launchedTab to missing value
+			repeat with candidateWindow in windows
+				if (id of candidateWindow) is not in previousWindowIDs and (count of tabs of candidateWindow) > 0 then
+					set launchedTab to selected tab of candidateWindow
+					exit repeat
+				end if
+			end repeat
+			if launchedTab is missing value and (count of tabs of targetWindow) > previousTabCount then set launchedTab to selected tab of targetWindow
+			if launchedTab is missing value then error "Terminal did not create a new tab. Allow Vibe Tabs to control Terminal in System Settings > Privacy & Security > Accessibility."
+			do script attachCommand in launchedTab
+			my waitForTmuxClient(tmuxBin, sessionName)
+			set custom title of launchedTab to sessionName
+			set title displays custom title of launchedTab to true
+			my applyTerminalProfile(launchedTab, terminalProfile)
 		end if
 	end tell
 end openProject
 
-on claudeCommand(sessionName, homeFolder)
+on claudeCommand(sessionName, homeFolder, dangerousMode, extraArgs, dangerousArgs)
 	set claudeBin to my resolveExecutable("claude", {homeFolder & "/.local/bin/claude", homeFolder & "/.claude/local/claude", "/opt/homebrew/bin/claude", "/usr/local/bin/claude"})
 	set rgBin to my resolveExecutable("rg", {"/opt/homebrew/bin/rg", "/usr/local/bin/rg"})
 	set claudeProjects to homeFolder & "/.claude/projects"
@@ -188,15 +229,17 @@ on claudeCommand(sessionName, homeFolder)
 		set claudeSessionID to ""
 	end try
 
+	set effectiveArgs to my effectiveAgentArgs("claude", dangerousMode, extraArgs, dangerousArgs)
 	if claudeSessionID is "" then
 		set claudeLaunch to quoted form of claudeBin & " --name " & quoted form of sessionName
 	else
 		set claudeLaunch to quoted form of claudeBin & " --resume " & quoted form of claudeSessionID & " --name " & quoted form of sessionName
 	end if
+	if effectiveArgs is not "" then set claudeLaunch to claudeLaunch & " " & effectiveArgs
 	return claudeLaunch & "; exec /bin/zsh -l"
 end claudeCommand
 
-on codexCommand(sessionName, homeFolder)
+on codexCommand(sessionName, homeFolder, dangerousMode, extraArgs, dangerousArgs)
 	set codexBin to my resolveExecutable("codex", {homeFolder & "/.local/bin/codex", "/opt/homebrew/bin/codex", "/usr/local/bin/codex"})
 	set jqBin to my resolveExecutable("jq", {"/opt/homebrew/bin/jq", "/usr/local/bin/jq", "/usr/bin/jq"})
 	set codexIndex to homeFolder & "/.codex/session_index.jsonl"
@@ -217,12 +260,7 @@ on codexCommand(sessionName, homeFolder)
 		end try
 	end if
 
-	set codexExtraArgs to ""
-	try
-		set codexExtraArgs to do shell script "/bin/zsh -lc " & quoted form of "/usr/bin/printf '%s' \"${VIBE_TABS_CODEX_ARGS-}\""
-	on error
-		set codexExtraArgs to ""
-	end try
+	set codexExtraArgs to my effectiveAgentArgs("codex", dangerousMode, extraArgs, dangerousArgs)
 
 	if codexSessionID is "" then
 		set codexLaunch to quoted form of codexBin
@@ -234,6 +272,52 @@ on codexCommand(sessionName, homeFolder)
 		return {commandText:(codexLaunch & " " & quoted form of codexSessionID & "; exec /bin/zsh -l"), renameAfterLaunch:false}
 	end if
 end codexCommand
+
+on parsePaneSpec(paneSpec, homeFolder)
+	if paneSpec starts with "vibe-json:" then
+		set encodedConfig to text 11 thru -1 of paneSpec
+		set paneJSON to do shell script "/usr/bin/printf '%s' " & quoted form of encodedConfig & " | /usr/bin/base64 -D"
+		set jqBin to my resolveExecutable("jq", {"/opt/homebrew/bin/jq", "/usr/local/bin/jq", "/usr/bin/jq"})
+		set agentValue to my jsonStringField(paneJSON, ".agent // \"\"", jqBin)
+		set commandValue to my jsonStringField(paneJSON, ".command // \"\"", jqBin)
+		set titleValue to my jsonStringField(paneJSON, ".title // \"\"", jqBin)
+		set argsValue to my jsonStringField(paneJSON, ".args // \"\"", jqBin)
+		set dangerousValue to my jsonStringField(paneJSON, ".dangerous // false | tostring", jqBin)
+		set dangerousArgsValue to my jsonStringField(paneJSON, ".dangerous_args // \"\"", jqBin)
+		return {paneAgent:agentValue, paneCommand:commandValue, paneTitle:titleValue, paneArgs:argsValue, paneDangerous:(dangerousValue is "true"), paneDangerousArgs:dangerousArgsValue}
+	end if
+
+	if paneSpec is "claude" or paneSpec is "codex" then
+		return {paneAgent:paneSpec, paneCommand:"", paneTitle:"", paneArgs:"", paneDangerous:false, paneDangerousArgs:""}
+	end if
+	return {paneAgent:"", paneCommand:paneSpec, paneTitle:"", paneArgs:"", paneDangerous:false, paneDangerousArgs:""}
+end parsePaneSpec
+
+on jsonStringField(jsonText, jqFilter, jqBin)
+	return do shell script "/usr/bin/printf '%s' " & quoted form of jsonText & " | " & quoted form of jqBin & " -er " & quoted form of jqFilter
+end jsonStringField
+
+on effectiveAgentArgs(agentName, dangerousMode, extraArgs, configuredDangerousArgs)
+	set resultArgs to my trimText(extraArgs)
+	if dangerousMode then
+		set dangerousArgs to my trimText(configuredDangerousArgs)
+		if dangerousArgs is "" then set dangerousArgs to my defaultDangerousArgs(agentName)
+		if dangerousArgs is "" then error "dangerous: true requires dangerous_args for agent or command: " & agentName
+		if resultArgs is "" then
+			set resultArgs to dangerousArgs
+		else
+			set resultArgs to resultArgs & " " & dangerousArgs
+		end if
+	end if
+	return resultArgs
+end effectiveAgentArgs
+
+on defaultDangerousArgs(agentName)
+	if agentName is "claude" then return "--dangerously-skip-permissions"
+	if agentName is "codex" then return "--yolo"
+	if agentName is "gemini" then return "--yolo"
+	return ""
+end defaultDangerousArgs
 
 on waitForTmuxClient(tmuxBin, sessionName)
 	repeat 20 times
@@ -249,12 +333,13 @@ on waitForTmuxClient(tmuxBin, sessionName)
 	end repeat
 end waitForTmuxClient
 
-on focusNamedTerminalTab(sessionName)
+on focusNamedTerminalTab(sessionName, terminalProfile)
 	tell application "Terminal"
 		repeat with terminalWindow in windows
 			repeat with terminalTab in tabs of terminalWindow
 				try
 					if (custom title of terminalTab as text) is sessionName then
+						my applyTerminalProfile(terminalTab, terminalProfile)
 						set selected tab of terminalWindow to terminalTab
 						set frontmost of terminalWindow to true
 						activate
@@ -268,7 +353,7 @@ on focusNamedTerminalTab(sessionName)
 	return false
 end focusNamedTerminalTab
 
-on nameAndFocusTerminalTab(clientTTY, sessionName)
+on nameAndFocusTerminalTab(clientTTY, sessionName, terminalProfile)
 	tell application "Terminal"
 		repeat with terminalWindow in windows
 			repeat with terminalTab in tabs of terminalWindow
@@ -276,6 +361,7 @@ on nameAndFocusTerminalTab(clientTTY, sessionName)
 					if (tty of terminalTab as text) is clientTTY then
 						set custom title of terminalTab to sessionName
 						set title displays custom title of terminalTab to true
+						my applyTerminalProfile(terminalTab, terminalProfile)
 						set selected tab of terminalWindow to terminalTab
 						set frontmost of terminalWindow to true
 						activate
@@ -288,6 +374,20 @@ on nameAndFocusTerminalTab(clientTTY, sessionName)
 	end tell
 	return false
 end nameAndFocusTerminalTab
+
+on validateTerminalProfile(terminalProfile)
+	if terminalProfile is "" then return
+	tell application "Terminal"
+		if terminalProfile is not in (name of every settings set) then error "Unknown Terminal profile: " & terminalProfile
+	end tell
+end validateTerminalProfile
+
+on applyTerminalProfile(terminalTab, terminalProfile)
+	if terminalProfile is "" then return
+	tell application "Terminal"
+		set current settings of terminalTab to settings set terminalProfile
+	end tell
+end applyTerminalProfile
 
 on resolveExecutable(commandName, fallbackPaths)
 	try

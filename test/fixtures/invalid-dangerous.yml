@@ -1,0 +1,8 @@
+version: 1
+
+sessions:
+  - name: unsafe-custom
+    path: /tmp
+    panes:
+      - agent: unknown-agent
+        dangerous: true

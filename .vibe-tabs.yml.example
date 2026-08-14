@@ -3,10 +3,17 @@ version: 1
 defaults:
   session_suffix: laptop
   layout: auto
+  terminal_profile: Pro
+  agents:
+    claude:
+      dangerous: false
+    codex:
+      dangerous: false
+    gemini:
+      dangerous: false
   panes:
-    - claude
-    - codex
-  codex_args: ""
+    - agent: claude
+    - agent: codex
 
 sessions:
   - name: web
@@ -14,14 +21,19 @@ sessions:
 
   - name: mobile
     path: ~/Code/example-mobile
+    terminal_profile: Ocean
     panes:
-      - gemini
-      - codex
+      - agent: gemini
+        dangerous: true
+      - agent: codex
 
   - name: research
     path: ~/Code/research
     layout: tiled
     panes:
-      - claude
-      - pi
-      - aider --model deepseek/deepseek-chat
+      - agent: claude
+      - agent: pi
+        dangerous: true
+        dangerous_args: --dangerously-skip-permissions
+      - command: aider --model deepseek/deepseek-chat
+        title: deepseek

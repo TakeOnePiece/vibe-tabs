@@ -3,7 +3,7 @@ set -euo pipefail
 
 SCRIPT_PATH="${0:A}"
 PROJECT_ROOT="${SCRIPT_PATH:h:h}"
-SESSION_COMMAND="$PROJECT_ROOT/bin/vibe-tab"
+SESSION_COMMAND="${VIBE_TABS_SESSION_COMMAND:-$PROJECT_ROOT/bin/vibe-tab}"
 
 if [[ "${1-}" == "--app" || "${1-}" == "app" ]]; then
   if [[ -d "$PROJECT_ROOT/Vibe Tabs.app" ]]; then
@@ -49,13 +49,24 @@ print -r -- "$config_json" | $jq_bin -e '.sessions | type == "array"' >/dev/null
   exit 1
 }
 
+is_first_session=true
 while IFS= read -r session_json; do
   print -r -- "$session_json" | $jq_bin -e '
     (.name | type == "string" and length > 0) and
     (.path | type == "string" and length > 0) and
     (.layout | type == "string") and
-    (.panes | type == "array" and length > 0 and all(.[]; type == "string" and length > 0)) and
-    (.codex_args | type == "string")
+    (.terminal_profile | type == "string") and
+    (.panes | type == "array" and length > 0 and all(.[];
+      type == "object" and
+      (.agent | type == "string") and
+      (.command | type == "string") and
+      (((.agent | length) > 0) != ((.command | length) > 0)) and
+      (.title | type == "string") and
+      (.args | type == "string") and
+      (.dangerous | type == "boolean") and
+      (.dangerous_args | type == "string") and
+      ((.dangerous == false) or ((.dangerous_args | length) > 0) or (.agent == "claude") or (.agent == "codex") or (.agent == "gemini"))
+    ))
   ' >/dev/null || {
     print -u2 "Invalid session entry: $session_json"
     exit 1
@@ -65,23 +76,56 @@ while IFS= read -r session_json; do
   session_path="$(print -r -- "$session_json" | $jq_bin -r '.path')"
   session_suffix="$(print -r -- "$session_json" | $jq_bin -r '.suffix')"
   session_layout="$(print -r -- "$session_json" | $jq_bin -r '.layout')"
-  codex_args="$(print -r -- "$session_json" | $jq_bin -r '.codex_args')"
-  pane_commands=("${(@f)$(print -r -- "$session_json" | $jq_bin -r '.panes[]')}")
+  terminal_profile="$(print -r -- "$session_json" | $jq_bin -r '.terminal_profile')"
+  pane_commands=("${(@f)$(print -r -- "$session_json" | $jq_bin -r '.panes[] | "vibe-json:" + @base64')}")
 
   if [[ -n "$session_suffix" && "$session_name" != *-"$session_suffix" ]]; then
     session_name="$session_name-$session_suffix"
   fi
 
-  VIBE_TABS_CODEX_ARGS="$codex_args" "$SESSION_COMMAND" --layout "$session_layout" "$session_name" "$session_path" "${pane_commands[@]}"
+  launcher_args=(--layout "$session_layout")
+  if [[ -n "$terminal_profile" ]]; then
+    launcher_args+=(--profile "$terminal_profile")
+  fi
+  if [[ "$is_first_session" == true ]]; then
+    launcher_args+=(--new-window)
+    is_first_session=false
+  fi
+  "$SESSION_COMMAND" "${launcher_args[@]}" "$session_name" "$session_path" "${pane_commands[@]}"
 done < <(print -r -- "$config_json" | $jq_bin -c '
-  .defaults as $defaults |
+  (.defaults // {}) as $defaults |
+  ($defaults.agents // {}) as $defaultAgents |
   .sessions[] |
+  (.codex_args // $defaults.codex_args // "") as $legacyCodexArgs |
+  (.panes // $defaults.panes // ["claude", "codex"]) as $rawPanes |
   {
     name: .name,
     path: .path,
     suffix: (.session_suffix // $defaults.session_suffix // ""),
     layout: (.layout // $defaults.layout // "auto"),
-    panes: (.panes // $defaults.panes // ["claude", "codex"]),
-    codex_args: (.codex_args // $defaults.codex_args // "")
+    terminal_profile: (.terminal_profile // $defaults.terminal_profile // ""),
+    panes: [
+      $rawPanes[] |
+      if type == "string" then
+        if test("^[[:alnum:]_.-]+$") then {agent: .} else {command: .} end
+      elif type == "object" then .
+      else error("panes must contain strings or objects")
+      end |
+      . as $pane |
+      if (($pane.agent // "") | length) > 0 then
+        (($defaultAgents[$pane.agent] // {}) + $pane)
+      else
+        $pane
+      end |
+      . as $merged |
+      {
+        agent: ($merged.agent // ""),
+        command: ($merged.command // ""),
+        title: ($merged.title // ""),
+        args: ($merged.args // (if $merged.agent == "codex" then $legacyCodexArgs else "" end)),
+        dangerous: ($merged.dangerous // false),
+        dangerous_args: ($merged.dangerous_args // "")
+      }
+    ]
   }
 ')

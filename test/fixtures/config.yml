@@ -1,0 +1,29 @@
+version: 1
+
+defaults:
+  session_suffix: test-mac
+  layout: even-horizontal
+  terminal_profile: Pro
+  agents:
+    claude:
+      dangerous: false
+    codex:
+      dangerous: true
+  panes:
+    - agent: claude
+    - agent: codex
+
+sessions:
+  - name: alpha
+    path: /tmp
+
+  - name: beta
+    path: /tmp
+    layout: tiled
+    terminal_profile: Ocean
+    panes:
+      - agent: gemini
+        dangerous: true
+        args: --model gemini-2.5-pro
+      - command: echo safe
+        title: shell
