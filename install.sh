@@ -17,7 +17,10 @@ if [[ ! -e "$HOME/.vibe-tabs.yml" && ! -e "$HOME/.vibe-tabs.yaml" ]]; then
 fi
 
 /usr/bin/osacompile -o "$APP_PATH" "$PROJECT_ROOT/libexec/open-vibe-tabs.applescript"
-cp "$PROJECT_ROOT/assets/applet.icns" "$APP_PATH/Contents/Resources/applet.icns"
+cp "$PROJECT_ROOT/assets/VibeTabs.icns" "$APP_PATH/Contents/Resources/VibeTabs.icns"
+/usr/bin/plutil -replace CFBundleIconFile -string VibeTabs "$APP_PATH/Contents/Info.plist"
+/usr/bin/plutil -remove CFBundleIconName "$APP_PATH/Contents/Info.plist" 2>/dev/null || true
+/usr/bin/plutil -replace CFBundleIdentifier -string com.takeonepiece.vibetabs "$APP_PATH/Contents/Info.plist"
 /usr/bin/touch "$APP_PATH"
 /usr/bin/codesign --force --deep --sign - "$APP_PATH" >/dev/null
 
