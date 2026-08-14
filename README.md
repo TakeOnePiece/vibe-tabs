@@ -1,22 +1,22 @@
-# Coding Sessions
+# Vibe Tabs
 
-Coding Sessions restores named AI coding workspaces with one click on macOS. A YAML file defines the project folder, tmux layout, and any coding commands you want in its panes: Claude, Codex, Gemini, Pi, Aider, OpenCode, a DeepSeek-backed command, or something else entirely.
+Vibe Tabs restores named AI coding workspaces with one click on macOS. A YAML file defines the project folder, tmux layout, and any coding commands you want in its panes: Claude, Codex, Gemini, Pi, Aider, OpenCode, a DeepSeek-backed command, or something else entirely.
 
 Each workspace name is shared by tmux and its Terminal tab. Claude and Codex additionally get name-aware conversation resume behavior.
 
 Running the launcher again selects the existing named Terminal tab. It does not create duplicate Terminal tabs, tmux sessions, or agent processes.
 
-![Coding Sessions icon](assets/coding-sessions-icon.png)
+![Vibe Tabs icon](assets/vibe-tabs-icon.png)
 
 ## Install with Homebrew
 
 ```sh
-brew install takeonepiece/tap/coding-sessions
+brew install takeonepiece/tap/vibe-tabs
 ```
 
 Your chosen coding CLIs must already be installed and authenticated. Homebrew installs `tmux`, `jq`, `yq`, and `ripgrep`.
 
-Create `~/.coding-sessions.yml`:
+Create `~/.vibe-tabs.yml`:
 
 ```yaml
 version: 1
@@ -51,20 +51,20 @@ sessions:
 Launch everything:
 
 ```sh
-coding-sessions
+vibe-tabs
 ```
 
 Or open the bundled launcher app:
 
 ```sh
-coding-sessions --app
+vibe-tabs --app
 ```
 
-After opening **Coding Sessions**, you can keep it in the Dock.
+After opening **Vibe Tabs**, you can keep it in the Dock.
 
 ## YAML specification
 
-The default config path is `~/.coding-sessions.yml`; `.yaml` is also accepted. A different YAML file can be passed to `coding-sessions`.
+The default config path is `~/.vibe-tabs.yml`; `.yaml` is also accepted. A different YAML file can be passed to `vibe-tabs`.
 
 Top level:
 
@@ -90,16 +90,16 @@ Per-session options override `defaults`. Existing tmux sessions remain untouched
 
 ```sh
 # Open every configured workspace
-coding-sessions
+vibe-tabs
 
 # Use another YAML config
-coding-sessions ./team-sessions.yml
+vibe-tabs ./team-sessions.yml
 
 # Open one workspace directly with explicit panes
-coding-session --layout tiled web-m1-mbp ~/Code/example-web claude codex gemini
+vibe-tab --layout tiled web-m1-mbp ~/Code/example-web claude codex gemini
 
 # Default to Claude + Codex and derive the name from the folder
-coding-session ~/Code/example-web
+vibe-tab ~/Code/example-web
 ```
 
 ## Reuse behavior
@@ -112,19 +112,19 @@ coding-session ~/Code/example-web
 
 ## Security
 
-Coding Sessions does not collect telemetry or send credentials anywhere. Authentication remains inside each coding CLI. Do not put API keys or tokens directly in the YAML; configure them through the CLI's normal credential mechanism or your local environment.
+Vibe Tabs does not collect telemetry or send credentials anywhere. Authentication remains inside each coding CLI. Do not put API keys or tokens directly in the YAML; configure them through the CLI's normal credential mechanism or your local environment.
 
 The repository ignores local configs, environment files, agent histories, SQLite state, private keys, and certificates. Pane entries are trusted local shell commands and should be reviewed like any shell script.
 
 ## Source install
 
 ```sh
-git clone https://github.com/takeonepiece/coding-sessions.git
-cd coding-sessions
+git clone https://github.com/takeonepiece/vibe-tabs.git
+cd vibe-tabs
 ./install.sh
 ```
 
-This installs commands in `~/bin` and builds `~/Applications/Coding Sessions.app`.
+This installs commands in `~/bin` and builds `~/Applications/Vibe Tabs.app`.
 
 ## License
 

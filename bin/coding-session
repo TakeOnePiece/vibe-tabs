@@ -1,6 +1,0 @@
-#!/bin/zsh
-set -e
-
-SCRIPT_PATH="${0:A}"
-PROJECT_ROOT="${SCRIPT_PATH:h:h}"
-exec /usr/bin/osascript "$PROJECT_ROOT/libexec/open-coding-session.applescript" "$@"

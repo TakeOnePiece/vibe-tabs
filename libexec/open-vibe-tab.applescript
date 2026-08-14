@@ -1,5 +1,5 @@
 -- Open one named project in tmux, with one pane per configured coding command.
--- Usage: coding-session [session-name] /path/to/project [command ...]
+-- Usage: vibe-tab [session-name] /path/to/project [command ...]
 
 on run argv
 	set requestedLayout to "auto"
@@ -21,7 +21,7 @@ on run argv
 		set paneSpecs to items 3 thru -1 of effectiveArgs
 		openProject(item 2 of effectiveArgs, item 1 of effectiveArgs, paneSpecs, requestedLayout)
 	else
-		error "Usage: coding-session [--layout layout] [session-name] /path/to/project [command ...]"
+		error "Usage: vibe-tab [--layout layout] [session-name] /path/to/project [command ...]"
 	end if
 end run
 
@@ -219,7 +219,7 @@ on codexCommand(sessionName, homeFolder)
 
 	set codexExtraArgs to ""
 	try
-		set codexExtraArgs to do shell script "/bin/zsh -lc " & quoted form of "/usr/bin/printf '%s' \"${CODING_SESSIONS_CODEX_ARGS-}\""
+		set codexExtraArgs to do shell script "/bin/zsh -lc " & quoted form of "/usr/bin/printf '%s' \"${VIBE_TABS_CODEX_ARGS-}\""
 	on error
 		set codexExtraArgs to ""
 	end try

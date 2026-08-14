@@ -3,36 +3,36 @@ set -euo pipefail
 
 SCRIPT_PATH="${0:A}"
 PROJECT_ROOT="${SCRIPT_PATH:h:h}"
-SESSION_COMMAND="$PROJECT_ROOT/bin/coding-session"
+SESSION_COMMAND="$PROJECT_ROOT/bin/vibe-tab"
 
 if [[ "${1-}" == "--app" || "${1-}" == "app" ]]; then
-  if [[ -d "$PROJECT_ROOT/Coding Sessions.app" ]]; then
-    exec /usr/bin/open "$PROJECT_ROOT/Coding Sessions.app"
+  if [[ -d "$PROJECT_ROOT/Vibe Tabs.app" ]]; then
+    exec /usr/bin/open "$PROJECT_ROOT/Vibe Tabs.app"
   fi
-  if [[ -d "$HOME/Applications/Coding Sessions.app" ]]; then
-    exec /usr/bin/open "$HOME/Applications/Coding Sessions.app"
+  if [[ -d "$HOME/Applications/Vibe Tabs.app" ]]; then
+    exec /usr/bin/open "$HOME/Applications/Vibe Tabs.app"
   fi
-  print -u2 "Coding Sessions.app was not found. Run ./install.sh from the source checkout."
+  print -u2 "Vibe Tabs.app was not found. Run ./install.sh from the source checkout."
   exit 1
 fi
 
 if (( $# > 1 )); then
-  print -u2 "Usage: coding-sessions [config.yml]"
+  print -u2 "Usage: vibe-tabs [config.yml]"
   exit 1
 fi
 
 config_file="${1-}"
 if [[ -z "$config_file" ]]; then
-  if [[ -f "$HOME/.coding-sessions.yml" ]]; then
-    config_file="$HOME/.coding-sessions.yml"
-  elif [[ -f "$HOME/.coding-sessions.yaml" ]]; then
-    config_file="$HOME/.coding-sessions.yaml"
+  if [[ -f "$HOME/.vibe-tabs.yml" ]]; then
+    config_file="$HOME/.vibe-tabs.yml"
+  elif [[ -f "$HOME/.vibe-tabs.yaml" ]]; then
+    config_file="$HOME/.vibe-tabs.yaml"
   fi
 fi
 config_file="${config_file/#\~/$HOME}"
 
 if [[ ! -f "$config_file" ]]; then
-  print -u2 "No config found. Create ~/.coding-sessions.yml."
+  print -u2 "No config found. Create ~/.vibe-tabs.yml."
   exit 1
 fi
 
@@ -72,7 +72,7 @@ while IFS= read -r session_json; do
     session_name="$session_name-$session_suffix"
   fi
 
-  CODING_SESSIONS_CODEX_ARGS="$codex_args" "$SESSION_COMMAND" --layout "$session_layout" "$session_name" "$session_path" "${pane_commands[@]}"
+  VIBE_TABS_CODEX_ARGS="$codex_args" "$SESSION_COMMAND" --layout "$session_layout" "$session_name" "$session_path" "${pane_commands[@]}"
 done < <(print -r -- "$config_json" | $jq_bin -c '
   .defaults as $defaults |
   .sessions[] |

@@ -2,12 +2,12 @@
 
 on run argv
 	set homeFolder to my homeDirectory()
-	set launcherBin to my resolveExecutable("coding-sessions", {homeFolder & "/bin/coding-sessions", "/opt/homebrew/bin/coding-sessions", "/usr/local/bin/coding-sessions"})
+	set launcherBin to my resolveExecutable("vibe-tabs", {homeFolder & "/bin/vibe-tabs", "/opt/homebrew/bin/vibe-tabs", "/usr/local/bin/vibe-tabs"})
 	set launchCommand to quoted form of launcherBin
 	if (count of argv) is 1 then
 		set launchCommand to launchCommand & " " & quoted form of (item 1 of argv)
 	else if (count of argv) > 1 then
-		error "Usage: coding-sessions [config-file]"
+		error "Usage: vibe-tabs [config-file]"
 	end if
 	do shell script launchCommand
 end run
