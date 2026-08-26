@@ -1,0 +1,325 @@
+#!/bin/zsh
+set -euo pipefail
+
+SCRIPT_PATH="${0:A}"
+PROJECT_ROOT="${SCRIPT_PATH:h:h}"
+LAUNCHER="${VIBE_TABS_LAUNCHER:-$PROJECT_ROOT/bin/vibe-tabs}"
+
+KNOWN_LAYOUTS=(auto even-horizontal even-vertical main-horizontal main-vertical tiled)
+GUI_AGENTS=(claude codex gemini pi opencode)
+
+gui_mode=false
+
+usage() {
+  print -r -- 'Usage: vibe-tabs add [options] [folder ...]
+
+Adds project folders to the sessions list in your Vibe Tabs config.
+With no folder, a macOS folder picker opens.
+
+Options:
+  --name NAME       session name; only valid with a single folder
+  --panes LIST      comma-separated agents, such as claude,codex
+  --layout LAYOUT   auto, even-horizontal, even-vertical, main-horizontal,
+                    main-vertical, or tiled
+  --profile NAME    Terminal settings profile, such as Pro or Ocean
+  --config FILE     config path; defaults to ~/.vibe-tabs.yml
+  --gui             confirm each folder in a macOS dialog
+  --dry-run         print the entry that would be added and exit
+  -h, --help        show this message
+
+Omitted options are inherited from the config'"'"'s defaults block.'
+}
+
+fail() {
+  local message="$1"
+  if [[ "$gui_mode" == true ]]; then
+    VIBE_TABS_MESSAGE="$message" /usr/bin/osascript <<'APPLESCRIPT' >/dev/null 2>&1 || true
+use scripting additions
+display dialog "Vibe Tabs could not add that project." & return & return & (system attribute "VIBE_TABS_MESSAGE") buttons {"OK"} default button "OK" with icon stop with title "Add to Vibe Tabs"
+APPLESCRIPT
+  fi
+  print -u2 -- "$message"
+  exit 1
+}
+
+# Exit code 3 means the person cancelled a dialog. The app bundle treats it as a no-op.
+cancelled() {
+  exit 3
+}
+
+slugify() {
+  local raw="${1:l}"
+  raw="${raw//[^a-z0-9._-]/-}"
+  while [[ "$raw" == *--* ]]; do raw="${raw//--/-}"; done
+  raw="${raw#-}"
+  raw="${raw%-}"
+  print -r -- "$raw"
+}
+
+collapse_home() {
+  local absolute="$1"
+  if [[ "$absolute" == "$HOME" ]]; then
+    print -r -- '~'
+  elif [[ "$absolute" == "$HOME"/* ]]; then
+    print -r -- "~${absolute#$HOME}"
+  else
+    print -r -- "$absolute"
+  fi
+}
+
+config_names() {
+  "$yq_bin" -r '.sessions // [] | .[] | .name // ""' "$config_file"
+}
+
+unique_name() {
+  local base="$1" candidate="$1" existing counter=2
+  existing="$(config_names)"
+  while print -r -- "$existing" | grep -qxF -- "$candidate"; do
+    candidate="$base-$counter"
+    (( counter++ ))
+  done
+  print -r -- "$candidate"
+}
+
+# yq rewrites the whole document and drops blank lines. When the config used
+# blank lines to separate blocks, put them back so hand-edited files survive.
+restore_blank_lines() {
+  local target="$1"
+  /usr/bin/awk '
+    NR > 1 && /^[^[:space:]#-]/ { print "" }
+    /^  - / {
+      if (seen_item) print ""
+      seen_item = 1
+    }
+    !/^  - / && /^[^[:space:]#-]/ { seen_item = 0 }
+    { print }
+  ' "$target" > "$target.styled"
+  /bin/mv "$target.styled" "$target"
+}
+
+gui_choose_folder() {
+  /usr/bin/osascript <<'APPLESCRIPT'
+use scripting additions
+set chosenFolder to choose folder with prompt "Choose a project folder to add to Vibe Tabs"
+return POSIX path of chosenFolder
+APPLESCRIPT
+}
+
+gui_prompt_name() {
+  local suggested="$1" folder="$2"
+  VIBE_TABS_NAME="$suggested" VIBE_TABS_PATH="$folder" /usr/bin/osascript <<'APPLESCRIPT'
+use scripting additions
+set suggestedName to system attribute "VIBE_TABS_NAME"
+set folderPath to system attribute "VIBE_TABS_PATH"
+set dialogResult to display dialog "Session name for" & return & folderPath default answer suggestedName with title "Add to Vibe Tabs" buttons {"Cancel", "Add"} default button "Add"
+return text returned of dialogResult
+APPLESCRIPT
+}
+
+gui_choose_agents() {
+  /usr/bin/osascript <<'APPLESCRIPT'
+use scripting additions
+set agentChoices to {"Use config defaults", "claude", "codex", "gemini", "pi", "opencode"}
+set chosen to choose from list agentChoices with title "Panes" with prompt "Which agents should open in this workspace?" default items {"Use config defaults"} with multiple selections allowed
+if chosen is false then error number -128
+set AppleScript's text item delimiters to ","
+set chosenText to chosen as text
+set AppleScript's text item delimiters to ""
+return chosenText
+APPLESCRIPT
+}
+
+gui_choose_profile() {
+  /usr/bin/osascript <<'APPLESCRIPT'
+use scripting additions
+set profileChoices to {"Use config default"}
+try
+  tell application "System Events"
+    if not (exists process "Terminal") then error "Terminal is not running"
+  end tell
+  tell application "Terminal" to set profileChoices to profileChoices & (name of every settings set)
+end try
+if (count of profileChoices) is 1 then return ""
+set chosen to choose from list profileChoices with title "Terminal Profile" with prompt "Which Terminal settings profile should this workspace use?" default items {"Use config default"}
+if chosen is false then error number -128
+set chosenText to item 1 of chosen
+if chosenText is "Use config default" then return ""
+return chosenText
+APPLESCRIPT
+}
+
+folders=()
+name_override=""
+panes=()
+layout=""
+profile=""
+config_file=""
+dry_run=false
+
+while (( $# > 0 )); do
+  case "$1" in
+    --name)    [[ $# -ge 2 ]] || fail "--name requires a value"; name_override="$2"; shift 2 ;;
+    --panes)   [[ $# -ge 2 ]] || fail "--panes requires a value"; panes=("${(@s:,:)2}"); shift 2 ;;
+    --layout)  [[ $# -ge 2 ]] || fail "--layout requires a value"; layout="$2"; shift 2 ;;
+    --profile) [[ $# -ge 2 ]] || fail "--profile requires a value"; profile="$2"; shift 2 ;;
+    --config)  [[ $# -ge 2 ]] || fail "--config requires a value"; config_file="$2"; shift 2 ;;
+    --gui)     gui_mode=true; shift ;;
+    --dry-run) dry_run=true; shift ;;
+    -h|--help) usage; exit 0 ;;
+    --)        shift; folders+=("$@"); break ;;
+    -*)        fail "Unknown option: $1" ;;
+    *)         folders+=("$1"); shift ;;
+  esac
+done
+
+yq_bin="$(command -v yq 2>/dev/null || true)"
+jq_bin="$(command -v jq 2>/dev/null || true)"
+[[ -n "$yq_bin" ]] || fail "Required command not found: yq"
+[[ -n "$jq_bin" ]] || fail "Required command not found: jq"
+
+if [[ -z "$config_file" ]]; then
+  config_file="${VIBE_TABS_CONFIG:-}"
+fi
+if [[ -z "$config_file" ]]; then
+  if [[ -f "$HOME/.vibe-tabs.yaml" && ! -f "$HOME/.vibe-tabs.yml" ]]; then
+    config_file="$HOME/.vibe-tabs.yaml"
+  else
+    config_file="$HOME/.vibe-tabs.yml"
+  fi
+fi
+config_file="${config_file/#\~/$HOME}"
+
+if [[ ! -f "$config_file" ]]; then
+  [[ -d "${config_file:h}" ]] || fail "No such directory: ${config_file:h}"
+  print -r -- 'version: 1
+
+sessions: []' > "$config_file"
+  print -r -- "Created $config_file"
+fi
+
+[[ -w "$config_file" ]] || fail "Config is not writable: $config_file"
+
+version="$("$yq_bin" -r '.version // 1' "$config_file")"
+[[ "$version" == "1" ]] || fail "Unsupported config version: $version"
+
+if [[ -n "$layout" ]]; then
+  (( ${KNOWN_LAYOUTS[(Ie)$layout]} )) || fail "Unknown layout: $layout (expected one of ${KNOWN_LAYOUTS[*]})"
+fi
+
+for pane in "${panes[@]}"; do
+  [[ -n "$pane" ]] || fail "--panes must not contain empty entries"
+  [[ "$pane" =~ '^[A-Za-z0-9_.-]+$' ]] || fail "Invalid agent name in --panes: $pane"
+done
+
+interactive_gui=false
+if (( ${#folders} == 0 )); then
+  gui_mode=true
+  interactive_gui=true
+  chosen_folder="$(gui_choose_folder 2>/dev/null)" || cancelled
+  [[ -n "$chosen_folder" ]] || cancelled
+  folders=("$chosen_folder")
+fi
+
+if [[ -n "$name_override" ]] && (( ${#folders} > 1 )); then
+  fail "--name accepts a single folder"
+fi
+
+if [[ "$interactive_gui" == true ]] && (( ${#panes} == 0 )); then
+  agent_selection="$(gui_choose_agents 2>/dev/null)" || cancelled
+  if [[ -n "$agent_selection" && "$agent_selection" != "Use config defaults" ]]; then
+    panes=("${(@s:,:)agent_selection}")
+    panes=("${(@)panes:#Use config defaults}")
+  fi
+fi
+
+if [[ "$interactive_gui" == true && -z "$profile" ]]; then
+  profile="$(gui_choose_profile 2>/dev/null)" || cancelled
+fi
+
+had_blank_lines=false
+grep -q '^[[:space:]]*$' "$config_file" && had_blank_lines=true
+
+added=()
+for folder in "${folders[@]}"; do
+  folder="${folder/#\~/$HOME}"
+  [[ -e "$folder" ]] || fail "No such folder: $folder"
+  if [[ ! -d "$folder" ]]; then
+    if [[ "$gui_mode" == true ]]; then
+      folder="${folder:h}"
+    else
+      fail "Not a folder: $folder"
+    fi
+  fi
+  absolute_path="${folder:a}"
+  display_path="$(collapse_home "$absolute_path")"
+
+  if [[ -n "$name_override" ]]; then
+    session_name="$(slugify "$name_override")"
+    [[ -n "$session_name" ]] || fail "Session name is empty after sanitising: $name_override"
+    if config_names | grep -qxF -- "$session_name"; then
+      fail "A session named '$session_name' already exists in $config_file"
+    fi
+  else
+    session_name="$(slugify "${absolute_path:t}")"
+    [[ -n "$session_name" ]] || session_name="workspace"
+    if [[ "$gui_mode" == true ]]; then
+      session_name="$(unique_name "$session_name")"
+      entered_name="$(gui_prompt_name "$session_name" "$display_path" 2>/dev/null)" || cancelled
+      session_name="$(slugify "$entered_name")"
+      [[ -n "$session_name" ]] || fail "Session name is empty after sanitising: $entered_name"
+      if config_names | grep -qxF -- "$session_name"; then
+        fail "A session named '$session_name' already exists in $config_file"
+      fi
+    elif config_names | grep -qxF -- "$session_name"; then
+      fail "A session named '$session_name' already exists in $config_file. Pass --name to choose another."
+    fi
+  fi
+
+  existing_path_name="$("$yq_bin" -r --arg wanted "$display_path" \
+    '.sessions // [] | map(select(.path == $wanted)) | .[0].name // ""' "$config_file" 2>/dev/null || print -r -- "")"
+  if [[ -n "$existing_path_name" ]]; then
+    print -u2 -- "Note: $display_path is already configured as '$existing_path_name'"
+  fi
+
+  entry_json="$("$jq_bin" -n --arg name "$session_name" --arg path "$display_path" '{name: $name, path: $path}')"
+  if [[ -n "$layout" ]]; then
+    entry_json="$(print -r -- "$entry_json" | "$jq_bin" --arg v "$layout" '. + {layout: $v}')"
+  fi
+  if [[ -n "$profile" ]]; then
+    entry_json="$(print -r -- "$entry_json" | "$jq_bin" --arg v "$profile" '. + {terminal_profile: $v}')"
+  fi
+  if (( ${#panes} > 0 )); then
+    panes_json="$(printf '%s\n' "${panes[@]}" | "$jq_bin" -R '{agent: .}' | "$jq_bin" -s '.')"
+    entry_json="$(print -r -- "$entry_json" | "$jq_bin" --argjson v "$panes_json" '. + {panes: $v}')"
+  fi
+
+  if [[ "$dry_run" == true ]]; then
+    print -r -- "$entry_json" | "$yq_bin" -P '[.]'
+    continue
+  fi
+
+  staged="$(mktemp -t vibe-tabs-config)"
+  /bin/cp "$config_file" "$staged"
+  VIBE_TABS_ENTRY="$entry_json" "$yq_bin" -i \
+    '.sessions = ((.sessions // []) + [env(VIBE_TABS_ENTRY)]) | (.sessions[-1] | ...) style = ""' "$staged"
+  [[ "$had_blank_lines" == true ]] && restore_blank_lines "$staged"
+
+  # Validate with the real launcher so a broken entry can never reach the config.
+  if ! VIBE_TABS_SESSION_COMMAND=/usr/bin/true "$LAUNCHER" "$staged" >/dev/null 2>&1; then
+    validation_output="$(VIBE_TABS_SESSION_COMMAND=/usr/bin/true "$LAUNCHER" "$staged" 2>&1 || true)"
+    /bin/rm -f "$staged"
+    fail "Refusing to write an invalid config:"$'\n'"$validation_output"
+  fi
+
+  /bin/cp "$config_file" "$config_file.bak"
+  /bin/cat "$staged" > "$config_file"
+  /bin/rm -f "$staged"
+  added+=("$session_name")
+  print -r -- "Added '$session_name' -> $display_path"
+done
+
+if [[ "$dry_run" == true ]]; then
+  exit 0
+fi
+
+print -r -- "Updated $config_file (previous version saved as $config_file.bak)"

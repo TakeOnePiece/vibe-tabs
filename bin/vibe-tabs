@@ -4,6 +4,12 @@ set -euo pipefail
 SCRIPT_PATH="${0:A}"
 PROJECT_ROOT="${SCRIPT_PATH:h:h}"
 SESSION_COMMAND="${VIBE_TABS_SESSION_COMMAND:-$PROJECT_ROOT/bin/vibe-tab}"
+ADD_COMMAND="${VIBE_TABS_ADD_COMMAND:-$PROJECT_ROOT/bin/vibe-tabs-add}"
+
+if [[ "${1-}" == "add" ]]; then
+  shift
+  exec "$ADD_COMMAND" "$@"
+fi
 
 if [[ "${1-}" == "--app" || "${1-}" == "app" ]]; then
   if [[ -d "$PROJECT_ROOT/Vibe Tabs.app" ]]; then
@@ -18,6 +24,7 @@ fi
 
 if (( $# > 1 )); then
   print -u2 "Usage: vibe-tabs [config.yml]"
+  print -u2 "       vibe-tabs add [options] [folder ...]"
   exit 1
 fi
 

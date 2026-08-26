@@ -74,6 +74,38 @@ After opening **Vibe Tabs**, you can keep it in the Dock.
 
 The launcher uses macOS UI scripting only to create native Terminal tabs. The first launch may ask you to allow **Vibe Tabs** under **System Settings → Privacy & Security → Accessibility**.
 
+## Adding projects
+
+`vibe-tabs add` appends a project to the `sessions` list without hand-editing YAML.
+
+```sh
+# Pick a folder in a macOS dialog, then choose agents and a Terminal profile
+vibe-tabs add
+
+# Add folders directly; the session name comes from the folder name
+vibe-tabs add ~/Code/example-web ~/Code/example-mobile
+
+# Override the inherited defaults for one project
+vibe-tabs add --name research --panes claude,gemini --layout tiled --profile Ocean ~/Code/research
+
+# Show the entry without writing it
+vibe-tabs add --dry-run ~/Code/example-web
+```
+
+You can also drag project folders onto the **Vibe Tabs** app icon in the Dock or Finder. Each dropped folder opens a dialog with the session name prefilled, and Vibe Tabs offers to launch everything once the folders are added.
+
+Options:
+
+- `--name`: session name; only valid with a single folder. Names are lowercased and reduced to letters, digits, `.`, `_`, and `-`.
+- `--panes`: comma-separated agents, such as `claude,codex`.
+- `--layout`, `--profile`: same values as the YAML fields below.
+- `--config`: config path; defaults to `~/.vibe-tabs.yml`. `VIBE_TABS_CONFIG` is also honoured.
+- `--dry-run`: print the entry instead of writing it.
+
+Anything you leave out is inherited from `defaults`, so most projects add as just a `name` and a `path`. Paths inside your home folder are stored with a leading `~`.
+
+Before writing, the new config is validated by the launcher itself, so a rejected entry never reaches the file. The previous version is kept as `~/.vibe-tabs.yml.bak`. Duplicate session names are refused, and a folder already configured under another name prints a warning. Comments and blank-line spacing in a hand-edited config are preserved.
+
 ## YAML specification
 
 The default config path is `~/.vibe-tabs.yml`; `.yaml` is also accepted. A different YAML file can be passed to `vibe-tabs`.
@@ -116,6 +148,9 @@ Per-session options override `defaults`. Existing tmux sessions remain untouched
 # Open every configured workspace
 vibe-tabs
 
+# Add a project to the config
+vibe-tabs add ~/Code/example-web
+
 # Use another YAML config
 vibe-tabs ./team-sessions.yml
 
@@ -149,7 +184,7 @@ cd vibe-tabs
 ./install.sh
 ```
 
-This installs commands in `~/bin` and builds `~/Applications/Vibe Tabs.app`.
+This installs `vibe-tab`, `vibe-tabs`, and `vibe-tabs-add` in `~/bin`, and builds `~/Applications/Vibe Tabs.app`.
 
 ## License
 

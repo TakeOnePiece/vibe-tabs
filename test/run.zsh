@@ -39,4 +39,48 @@ dangerous_args="$(osascript \
   -e "return testedScript's effectiveAgentArgs(\"codex\", true, \"--model gpt\", \"\")")"
 [[ "$dangerous_args" == "--model gpt --yolo" ]]
 
+# vibe-tabs add
+ADD_CONFIG="$(mktemp -t vibe-tabs-add-config)"
+ADD_DIR="$(mktemp -d -t vibe-tabs-add-dir)"
+trap '/bin/rm -f "$TEST_OUTPUT" "$INVALID_OUTPUT" "$ADD_CONFIG" "$ADD_CONFIG.bak"; /bin/rm -rf "$ADD_DIR"' EXIT
+/bin/cp "$TEST_DIR/fixtures/config.yml" "$ADD_CONFIG"
+mkdir -p "$ADD_DIR/Gamma Project"
+
+"$PROJECT_ROOT/bin/vibe-tabs" add --config "$ADD_CONFIG" --panes claude,gemini --layout tiled \
+  "$ADD_DIR/Gamma Project" >/dev/null
+
+yq -e '.sessions | length == 3' "$ADD_CONFIG" >/dev/null
+yq -e '.sessions[2].name == "gamma-project"' "$ADD_CONFIG" >/dev/null
+yq -e '.sessions[2].layout == "tiled"' "$ADD_CONFIG" >/dev/null
+yq -o=json '.sessions[2].panes' "$ADD_CONFIG" | jq -e '. == [{"agent": "claude"}, {"agent": "gemini"}]' >/dev/null
+
+# The fixture separates sessions with blank lines; the rewrite must keep them.
+[[ "$(grep -c '^$' "$ADD_CONFIG")" -ge 4 ]]
+rg -q '^  - name: gamma-project$' "$ADD_CONFIG"
+
+# The added entry must survive the launcher's own validation.
+VIBE_TABS_TEST_OUTPUT="$TEST_OUTPUT" \
+  VIBE_TABS_SESSION_COMMAND="$TEST_DIR/capture-args.zsh" \
+  "$PROJECT_ROOT/bin/vibe-tabs" "$ADD_CONFIG" >/dev/null
+
+add_rejects() {
+  if "$PROJECT_ROOT/bin/vibe-tabs" add --config "$ADD_CONFIG" "$@" >/dev/null 2>&1; then
+    print -u2 "Expected 'vibe-tabs add $*' to fail"
+    exit 1
+  fi
+}
+
+add_rejects "$ADD_DIR/Gamma Project"
+add_rejects --layout sideways "$ADD_DIR"
+add_rejects --panes 'claude;rm -rf /' "$ADD_DIR"
+add_rejects --name one --name two "$ADD_DIR" "$ADD_DIR/Gamma Project"
+add_rejects "$ADD_DIR/does-not-exist"
+
+# A rejected add must leave the config exactly as it was.
+yq -e '.sessions | length == 3' "$ADD_CONFIG" >/dev/null
+
+# A home-relative folder is stored with a tilde so it matches hand-written entries.
+"$PROJECT_ROOT/bin/vibe-tabs" add --config "$ADD_CONFIG" --name tilde-check "$HOME" >/dev/null
+yq -e '.sessions[3].path == "~"' "$ADD_CONFIG" >/dev/null
+
 print "All tests passed"
