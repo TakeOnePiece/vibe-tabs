@@ -45,11 +45,25 @@ on openProject(rawFolder, requestedName, configuredPanes, requestedLayout, termi
 	set projectFolder to my expandHomePath(rawFolder, homeFolder)
 	my validateTerminalProfile(terminalProfile)
 
-	do shell script "/bin/test -d " & quoted form of projectFolder
-	set canonicalFolder to do shell script "/bin/zsh -c " & quoted form of ("cd " & quoted form of projectFolder & " && /bin/pwd -P")
-	set projectName to do shell script "/usr/bin/basename " & quoted form of canonicalFolder
+	set folderExists to true
+	try
+		do shell script "/bin/test -d " & quoted form of projectFolder
+	on error
+		set folderExists to false
+	end try
 
-	if requestedName is "" then set requestedName to projectName
+	set canonicalFolder to ""
+	if folderExists then
+		set canonicalFolder to do shell script "/bin/zsh -c " & quoted form of ("cd " & quoted form of projectFolder & " && /bin/pwd -P")
+		set projectName to do shell script "/usr/bin/basename " & quoted form of canonicalFolder
+		if requestedName is "" then set requestedName to projectName
+	else
+		-- `vibe-tab name` with no such folder: treat the argument as a session
+		-- name and attach if that session is already running.
+		if requestedName is not "" then error "Project folder not found: " & projectFolder
+		set requestedName to rawFolder
+	end if
+
 	set sessionName to my slugify(requestedName)
 	if sessionName is "" then error "Session name must contain a letter or number"
 
@@ -67,6 +81,10 @@ on openProject(rawFolder, requestedName, configuredPanes, requestedLayout, termi
 	on error
 		set sessionExists to false
 	end try
+
+	if sessionExists is false and folderExists is false then
+		error "'" & rawFolder & "' is not a folder, and no tmux session named '" & sessionName & "' is running. Usage: vibe-tab [session-name] /path/to/project [command ...]"
+	end if
 
 	if sessionExists is false then
 		set paneCommands to {}
