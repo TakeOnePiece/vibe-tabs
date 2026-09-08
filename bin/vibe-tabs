@@ -50,6 +50,7 @@ print -r -- "$config_json" | $jq_bin -e '.sessions | type == "array"' >/dev/null
 }
 
 is_first_session=true
+failed_sessions=()
 while IFS= read -r session_json; do
   print -r -- "$session_json" | $jq_bin -e '
     (.name | type == "string" and length > 0) and
@@ -91,7 +92,10 @@ while IFS= read -r session_json; do
     launcher_args+=(--new-window)
     is_first_session=false
   fi
-  "$SESSION_COMMAND" "${launcher_args[@]}" "$session_name" "$session_path" "${pane_commands[@]}"
+  if ! "$SESSION_COMMAND" "${launcher_args[@]}" "$session_name" "$session_path" "${pane_commands[@]}"; then
+    print -u2 "vibe-tabs: failed to open session $session_name; continuing with the next one"
+    failed_sessions+=("$session_name")
+  fi
 done < <(print -r -- "$config_json" | $jq_bin -c '
   (.defaults // {}) as $defaults |
   ($defaults.agents // {}) as $defaultAgents |
@@ -129,3 +133,8 @@ done < <(print -r -- "$config_json" | $jq_bin -c '
     ]
   }
 ')
+
+if (( ${#failed_sessions} > 0 )); then
+  print -u2 "vibe-tabs: ${#failed_sessions} session(s) failed: ${(j:, :)failed_sessions}"
+  exit 1
+fi

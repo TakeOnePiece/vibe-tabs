@@ -188,27 +188,14 @@ on openProject(rawFolder, requestedName, configuredPanes, requestedLayout, termi
 			set title displays custom title of launchedTab to true
 			my applyTerminalProfile(launchedTab, terminalProfile)
 		else
-			set targetWindow to front window
-			set previousWindowIDs to id of every window
-			set previousTabCount to count of tabs of targetWindow
-			tell application "System Events"
-				tell process "Terminal"
-					set frontmost to true
-					key code 17 using command down
-				end tell
-			end tell
-			delay 0.4
-
-			set launchedTab to missing value
-			repeat with candidateWindow in windows
-				if (id of candidateWindow) is not in previousWindowIDs and (count of tabs of candidateWindow) > 0 then
-					set launchedTab to selected tab of candidateWindow
-					exit repeat
-				end if
-			end repeat
-			if launchedTab is missing value and (count of tabs of targetWindow) > previousTabCount then set launchedTab to selected tab of targetWindow
-			if launchedTab is missing value then error "Terminal did not create a new tab. Allow Vibe Tabs to control Terminal in System Settings > Privacy & Security > Accessibility."
-			do script attachCommand in launchedTab
+			set launchedTab to my newTerminalTab()
+			if launchedTab is missing value then
+				-- UI scripting was refused (no Accessibility permission), so open a window instead of failing.
+				log "vibe-tab: Accessibility access is not granted, so " & sessionName & " opened in a new window instead of a tab. Allow your terminal app under System Settings > Privacy & Security > Accessibility to get tabs."
+				set launchedTab to do script attachCommand
+			else
+				do script attachCommand in launchedTab
+			end if
 			my waitForTmuxClient(tmuxBin, sessionName)
 			set custom title of launchedTab to sessionName
 			set title displays custom title of launchedTab to true
@@ -318,6 +305,37 @@ on defaultDangerousArgs(agentName)
 	if agentName is "gemini" then return "--yolo"
 	return ""
 end defaultDangerousArgs
+
+-- Create a new tab in the front Terminal window with Cmd+T via System Events.
+-- Returns missing value when UI scripting is not allowed (Accessibility permission
+-- missing, error 1002) or when no new tab appeared, so callers can fall back.
+on newTerminalTab()
+	tell application "Terminal"
+		set targetWindow to front window
+		set previousWindowIDs to id of every window
+		set previousTabCount to count of tabs of targetWindow
+	end tell
+	try
+		tell application "System Events"
+			tell process "Terminal"
+				set frontmost to true
+				key code 17 using command down
+			end tell
+		end tell
+	on error
+		return missing value
+	end try
+	delay 0.4
+	tell application "Terminal"
+		repeat with candidateWindow in windows
+			if (id of candidateWindow) is not in previousWindowIDs and (count of tabs of candidateWindow) > 0 then
+				return selected tab of candidateWindow
+			end if
+		end repeat
+		if (count of tabs of targetWindow) > previousTabCount then return selected tab of targetWindow
+	end tell
+	return missing value
+end newTerminalTab
 
 on waitForTmuxClient(tmuxBin, sessionName)
 	repeat 20 times
